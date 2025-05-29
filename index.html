@@ -513,12 +513,13 @@
             fileInput.click();
         }
 
-        // Manejar carga de imagen
+        // Manejar carga de imagen - FUNCIÓN COMPLETAMENTE REESCRITA
         async function handleImageUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
 
             try {
+                console.log('Procesando archivo:', file.name, 'Tipo:', file.type, 'Tamaño:', file.size);
                 showStatus('Cargando imagen...', 'loading');
 
                 // Validar tipo de archivo
@@ -527,155 +528,256 @@
                     return;
                 }
 
-                // Crear elemento de imagen
-                const img = new Image();
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
+                // Usar Promise para manejar la carga de imagen
+                const processImage = () => {
+                    return new Promise((resolve, reject) => {
+                        const img = new Image();
+                        
+                        img.onload = function() {
+                            try {
+                                console.log('Imagen cargada:', img.width, 'x', img.height);
+                                
+                                // Crear canvas para la imagen
+                                const canvas = document.createElement('canvas');
+                                const ctx = canvas.getContext('2d');
 
-                img.onload = async function() {
-                    // Redimensionar imagen manteniendo proporción
-                    const maxSize = 300;
-                    let { width, height } = img;
-                    
-                    if (width > height) {
-                        if (width > maxSize) {
-                            height = (height * maxSize) / width;
-                            width = maxSize;
-                        }
-                    } else {
-                        if (height > maxSize) {
-                            width = (width * maxSize) / height;
-                            height = maxSize;
-                        }
-                    }
+                                // Mantener tamaño original pero limitado
+                                const maxSize = 400;
+                                let { width, height } = img;
+                                
+                                if (width > maxSize || height > maxSize) {
+                                    if (width > height) {
+                                        height = (height * maxSize) / width;
+                                        width = maxSize;
+                                    } else {
+                                        width = (width * maxSize) / height;
+                                        height = maxSize;
+                                    }
+                                }
 
-                    canvas.width = width;
-                    canvas.height = height;
-                    ctx.drawImage(img, 0, 0, width, height);
+                                canvas.width = width;
+                                canvas.height = height;
+                                ctx.drawImage(img, 0, 0, width, height);
 
-                    // Mostrar imagen en el contenedor
-                    webcamContainer.innerHTML = '';
-                    const displayImg = document.createElement('img');
-                    displayImg.src = canvas.toDataURL();
-                    displayImg.className = 'uploaded-image';
-                    webcamContainer.appendChild(displayImg);
+                                console.log('Canvas creado:', width, 'x', height);
 
-                    // Guardar imagen actual
-                    currentImage = canvas;
-                    isImageMode = true;
+                                // Mostrar imagen en el contenedor
+                                webcamContainer.innerHTML = '';
+                                const displayImg = document.createElement('img');
+                                displayImg.src = canvas.toDataURL();
+                                displayImg.className = 'uploaded-image';
+                                displayImg.style.maxWidth = '100%';
+                                displayImg.style.height = 'auto';
+                                webcamContainer.appendChild(displayImg);
 
-                    // Mostrar información de la imagen
-                    document.getElementById('image-name').textContent = file.name;
-                    document.getElementById('image-size').textContent = `${width}x${height}px (${(file.size / 1024).toFixed(1)} KB)`;
-                    imageInfo.style.display = 'block';
+                                // Guardar imagen actual
+                                currentImage = canvas;
+                                isImageMode = true;
 
-                    // Cambiar a modo imagen
-                    switchToImageMode();
+                                console.log('currentImage asignado:', !!currentImage);
 
-                    // Cargar modelo si no está cargado
-                    if (!model) {
-                        await loadModelOnly();
-                    }
+                                resolve({ width, height });
+                                
+                            } catch (error) {
+                                reject(error);
+                            }
+                        };
 
-                    // Configurar predicciones si no están configuradas
-                    if (!labelContainer.children.length) {
-                        setupPredictionContainer();
-                    }
+                        img.onerror = function() {
+                            reject(new Error('No se pudo cargar la imagen'));
+                        };
 
-                    // Analizar imagen automáticamente
-                    await analyzeCurrentImage();
-
-                    showStatus('✅ Imagen cargada y analizada', 'success');
-                    setTimeout(hideStatus, 2000);
+                        // Crear URL de la imagen
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            img.src = e.target.result;
+                        };
+                        reader.onerror = function() {
+                            reject(new Error('Error al leer el archivo'));
+                        };
+                        reader.readAsDataURL(file);
+                    });
                 };
 
-                img.onerror = function() {
-                    showStatus('❌ Error al cargar la imagen', 'error');
-                };
+                // Procesar la imagen
+                const { width, height } = await processImage();
 
-                // Crear URL de la imagen
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    img.src = e.target.result;
-                };
-                reader.readAsDataURL(file);
+                // Mostrar información de la imagen
+                document.getElementById('image-name').textContent = file.name;
+                document.getElementById('image-size').textContent = `${width}x${height}px (${(file.size / 1024).toFixed(1)} KB)`;
+                imageInfo.style.display = 'block';
+
+                // Cambiar a modo imagen
+                switchToImageMode();
+
+                // Cargar modelo si no está cargado
+                if (!model) {
+                    showStatus('Cargando modelo para análisis...', 'loading');
+                    await loadModelOnly();
+                }
+
+                // Configurar predicciones si no están configuradas
+                if (!labelContainer || !labelContainer.children.length || labelContainer.children.length === 1) {
+                    setupPredictionContainer();
+                }
+
+                // Pequeña pausa para asegurar que todo esté listo
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                // Analizar imagen automáticamente
+                console.log('Iniciando análisis automático...');
+                await analyzeCurrentImage();
 
             } catch (error) {
-                console.error('Error al procesar imagen:', error);
-                showStatus('❌ Error al procesar la imagen', 'error');
+                console.error('Error completo al manejar imagen:', error);
+                showStatus('❌ Error al procesar la imagen: ' + error.message, 'error');
+                currentImage = null;
+                isImageMode = false;
             }
         }
 
-        // Cargar solo el modelo (sin cámara)
+        // Cargar solo el modelo (sin cámara) - FUNCIÓN MEJORADA
         async function loadModelOnly() {
-            if (model) return;
+            if (model) {
+                console.log('Modelo ya cargado');
+                return;
+            }
 
             try {
+                console.log('Intentando cargar modelo desde:', URL);
                 showStatus('Cargando modelo de IA...', 'loading');
                 
                 const modelURL = URL + "model.json";
                 const metadataURL = URL + "metadata.json";
 
+                console.log('URLs del modelo:', { modelURL, metadataURL });
+
+                // Verificar que los archivos existen
+                try {
+                    const modelResponse = await fetch(modelURL);
+                    const metadataResponse = await fetch(metadataURL);
+                    
+                    if (!modelResponse.ok) {
+                        throw new Error(`No se puede acceder a ${modelURL}. Status: ${modelResponse.status}`);
+                    }
+                    if (!metadataResponse.ok) {
+                        throw new Error(`No se puede acceder a ${metadataURL}. Status: ${metadataResponse.status}`);
+                    }
+                    
+                    console.log('Archivos del modelo accesibles');
+                } catch (fetchError) {
+                    throw new Error(`Error al acceder a los archivos del modelo: ${fetchError.message}`);
+                }
+
                 model = await tmImage.load(modelURL, metadataURL);
                 maxPredictions = model.getTotalClasses();
+
+                console.log('Modelo cargado exitosamente. Clases:', maxPredictions);
 
                 document.getElementById('modelClasses').textContent = maxPredictions;
                 modelInfo.style.display = 'block';
 
                 hideStatus();
             } catch (error) {
-                throw error;
+                console.error('Error detallado al cargar modelo:', error);
+                throw new Error(`No se pudo cargar el modelo: ${error.message}`);
             }
         }
 
-        // Analizar imagen actual
+        // Analizar imagen actual - FUNCIÓN COMPLETAMENTE CORREGIDA
         async function analyzeCurrentImage() {
-            if (!currentImage || !model) {
-                showStatus('❌ No hay imagen cargada o modelo no disponible', 'error');
+            console.log('Iniciando análisis de imagen...');
+            console.log('currentImage existe:', !!currentImage);
+            console.log('model existe:', !!model);
+
+            if (!currentImage) {
+                showStatus('❌ No hay imagen cargada', 'error');
                 return;
+            }
+
+            if (!model) {
+                showStatus('❌ Modelo no disponible. Cargando...', 'loading');
+                try {
+                    await loadModelOnly();
+                } catch (error) {
+                    showStatus('❌ Error al cargar modelo: ' + error.message, 'error');
+                    return;
+                }
             }
 
             try {
                 showStatus('Analizando imagen...', 'loading');
 
-                const prediction = await model.predict(currentImage);
-                displayPredictions(prediction);
+                // Crear un canvas normalizado de 224x224 (tamaño estándar para modelos)
+                const normalizedCanvas = document.createElement('canvas');
+                const ctx = normalizedCanvas.getContext('2d');
+                normalizedCanvas.width = 224;
+                normalizedCanvas.height = 224;
 
-                hideStatus();
+                // Dibujar la imagen redimensionada al tamaño estándar
+                ctx.drawImage(currentImage, 0, 0, 224, 224);
+
+                console.log('Canvas creado:', normalizedCanvas.width, 'x', normalizedCanvas.height);
+
+                // Realizar predicción con el canvas normalizado
+                const prediction = await model.predict(normalizedCanvas);
+                
+                console.log('Predicción obtenida:', prediction);
+
+                if (prediction && prediction.length > 0) {
+                    displayPredictions(prediction);
+                    showStatus('✅ Análisis completado', 'success');
+                    setTimeout(hideStatus, 2000);
+                } else {
+                    showStatus('❌ No se pudieron obtener predicciones', 'error');
+                }
+
             } catch (error) {
-                console.error('Error al analizar imagen:', error);
-                showStatus('❌ Error al analizar la imagen', 'error');
+                console.error('Error detallado al analizar imagen:', error);
+                console.error('Stack trace:', error.stack);
+                showStatus('❌ Error al analizar: ' + error.message, 'error');
             }
         }
 
-        // Mostrar predicciones
+        // Mostrar predicciones - FUNCIÓN MEJORADA
         function displayPredictions(prediction) {
+            if (!prediction || !labelContainer) return;
+
             const sortedPredictions = prediction.sort((a, b) => b.probability - a.probability);
             
-            for (let i = 0; i < maxPredictions; i++) {
+            // Asegurar que tenemos suficientes elementos de predicción
+            if (labelContainer.children.length < maxPredictions) {
+                setupPredictionContainer();
+            }
+
+            for (let i = 0; i < Math.min(maxPredictions, sortedPredictions.length); i++) {
                 const predItem = labelContainer.children[i];
+                if (!predItem) continue;
+
                 const pred = sortedPredictions[i];
                 
                 const label = predItem.querySelector('.prediction-label');
                 const fill = predItem.querySelector('.prediction-fill');
                 const percentage = predItem.querySelector('.prediction-percentage');
                 
-                const confidence = (pred.probability * 100).toFixed(1);
-                const isHighConfidence = pred.probability > confidenceThreshold;
-                
-                label.textContent = pred.className;
-                fill.style.width = `${confidence}%`;
-                percentage.textContent = `${confidence}%`;
-                
-                // Resaltar la predicción más confiable
-                if (i === 0 && isHighConfidence) {
-                    predItem.classList.add('highest-confidence');
-                } else {
-                    predItem.classList.remove('highest-confidence');
+                if (label && fill && percentage) {
+                    const confidence = (pred.probability * 100).toFixed(1);
+                    const isHighConfidence = pred.probability > confidenceThreshold;
+                    
+                    label.textContent = pred.className;
+                    fill.style.width = `${confidence}%`;
+                    percentage.textContent = `${confidence}%`;
+                    
+                    // Resaltar la predicción más confiable
+                    if (i === 0 && isHighConfidence) {
+                        predItem.classList.add('highest-confidence');
+                    } else {
+                        predItem.classList.remove('highest-confidence');
+                    }
+                    
+                    // Cambiar opacidad según el umbral
+                    predItem.style.opacity = isHighConfidence ? '1' : '0.6';
                 }
-                
-                // Cambiar opacidad según el umbral
-                predItem.style.opacity = isHighConfidence ? '1' : '0.6';
             }
         }
 
@@ -702,7 +804,7 @@
 
         // Bucle principal de predicción
         async function loop() {
-            if (!isRunning) return;
+            if (!isRunning || isImageMode) return;
             
             try {
                 webcam.update();
@@ -710,7 +812,7 @@
                 animationId = window.requestAnimationFrame(loop);
             } catch (error) {
                 console.error('Error en el bucle de predicción:', error);
-                showStatus('Error en la predicción', 'error');
+                showStatus('Error en la predicción: ' + error.message, 'error');
             }
         }
 
@@ -791,7 +893,7 @@
         // Manejo de errores globales
         window.addEventListener('error', function(event) {
             console.error('Error global:', event.error);
-            showStatus('Se produjo un error inesperado', 'error');
+            showStatus('Se produjo un error inesperado: ' + event.error.message, 'error');
         });
 
         // Cleanup al cerrar la página
